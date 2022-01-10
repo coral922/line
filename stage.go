@@ -1,4 +1,4 @@
-package coral
+package line
 
 import (
 	"fmt"
@@ -45,7 +45,7 @@ func (s *Stage) initWorkers() *Stage {
 func (s *Stage) newWorker(index int) *worker {
 	return newWorker(
 		s.name+"-"+fmt.Sprintf("%d", index),
-		s.inputCh, s.outputCh, s.errCh,
+		&s.inputCh, &s.outputCh, s.errCh,
 		s.workFunc, s.option.execOption)
 }
 
@@ -130,22 +130,22 @@ func (s *Stage) listen() {
 	}
 }
 
-// returnIfIdle assert that no new input from now on and spin until all workers are idle.
+// returnIfIdle assert that no more input from now on and wait until all workers are idle.
 // it may return improperly when the line is open.
 func (s *Stage) returnIfIdle() {
 	for _, w := range s.workers {
-		for w.execFlag.Val() {
-		}
+		<-w.execFlag
 	}
 }
 
 func (s *Stage) stop() {
-	if s.active.Cas(true, false) {
+	if s.active.Val() {
 		for _, worker := range s.workers {
 			worker.gracefullyStop()
 		}
 		s.close <- struct{}{}
 	}
+	s.active.Cas(true, false)
 }
 
 type ErrorMsg struct {

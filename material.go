@@ -1,8 +1,9 @@
-package coral
+package line
 
 import "sync"
 
 type M struct {
+	// user-defined item
 	item interface{}
 
 	// wg is used for process control

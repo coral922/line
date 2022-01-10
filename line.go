@@ -1,4 +1,4 @@
-package coral
+package line
 
 import (
 	"container/list"
@@ -9,7 +9,7 @@ import (
 
 type Line struct {
 	stages             map[string]*Stage
-	first, last        *Stage
+	first              *Stage
 	sourceCh           chan *M
 	opened             *sBool
 	sigInputLoopExited chan struct{}
@@ -40,12 +40,14 @@ func WithCustomQueue(q Queue) LineOption {
 
 func NewLine(option ...LineOption) *Line {
 	l := &Line{
-		stages:          make(map[string]*Stage),
-		sourceCh:        make(chan *M),
-		opened:          newSBool(),
-		highestPriority: new(uint32),
-		mu:              sync.Mutex{},
+		stages:             make(map[string]*Stage),
+		sourceCh:           make(chan *M),
+		opened:             newSBool(),
+		sigInputLoopExited: make(chan struct{}),
+		highestPriority:    new(uint32),
+		mu:                 sync.Mutex{},
 	}
+	close(l.sigInputLoopExited)
 	for _, o := range option {
 		o(&l.lineOption)
 	}
@@ -112,7 +114,7 @@ func WithWait() InputOption {
 	}
 }
 
-// Input pushes your input object(s) to input queue and return.
+// Input pushes your input object(s) to input queue with giving option.
 func (l *Line) Input(obj interface{}, opt ...InputOption) {
 	var in inputOption
 	for _, o := range opt {
@@ -143,60 +145,54 @@ func (l *Line) Input(obj interface{}, opt ...InputOption) {
 	}
 }
 
+// InputAndWait pushes your input object(s) to input queue and wait until all been done.
 func (l *Line) InputAndWait(obj interface{}, opt ...InputOption) {
 	l.Input(obj, append(opt, WithWait())...)
 }
 
-func (l *Line) AppendStage(name string, function WorkFunc, option ...StageOption) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.mustClosed()
-	if _, e := l.stages[name]; e {
-		panic(ErrDupName)
-	}
-	u := NewStage(name, function, option...)
-	if l.first == nil {
-		l.first = u
-		l.first.setInputCh(l.sourceCh)
-	} else {
-		last := l.first
-		for last.getNext() != nil {
-			last = last.getNext()
-		}
-		last.setNext(u)
-	}
-	u.initWorkers()
-	l.stages[name] = u
+func (l *Line) AppendStage() {
+	//TODO
 }
 
-func (l *Line) RemoveStageByName(name string) {
+// SetStages set your stages.
+// When line is running, it'll stop the line and rerun after stages been set.
+func (l *Line) SetStages(stages ...*Stage) *Line {
+	needRun := l.StopAndWait()
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.removeAllStages()
+	var last *Stage
+	for _, s := range stages {
+		stg := s
+		if _, e := l.stages[stg.name]; e {
+			panic(ErrDupName)
+		}
+		if l.first == nil {
+			l.first = stg
+			l.first.setInputCh(l.sourceCh)
+		} else {
+			last.setNext(stg)
+		}
+		stg.initWorkers()
+		l.stages[stg.name] = stg
+		last = stg
+	}
+	if needRun {
+		l.Run()
+	}
+	return l
+}
+
+func (l *Line) removeAllStages() {
 	l.mustClosed()
-	u, exist := l.stages[name]
-	if !exist {
-		return
+	l.stages = make(map[string]*Stage)
+	u := l.first
+	l.first = nil
+	for u != nil {
+		u.setInputCh(nil)
+		go u.stop()
+		u = u.getNext()
 	}
-	i := l.first
-	for {
-		if i == nil {
-			break
-		}
-		if i == u {
-			l.first = u.next
-			if u.next != nil {
-				u.next.setInputCh(l.sourceCh)
-			}
-			break
-		}
-		if i.next == u {
-			i.setNext(u.next)
-			break
-		}
-		i = i.next
-	}
-	go u.stop()
-	delete(l.stages, name)
 }
 
 func (l *Line) GetStage(stageName string) *Stage {
@@ -218,19 +214,20 @@ func (l *Line) Run() {
 }
 
 // Stop stops fetching item from queue.
-func (l *Line) Stop() {
-	l.opened.Cas(true, false)
+func (l *Line) Stop() (switched bool) {
+	return l.opened.Cas(true, false)
 }
 
 // StopAndWait stops fetching item from queue and wait until nothing is running.
-func (l *Line) StopAndWait() {
-	l.Stop()
+func (l *Line) StopAndWait() (switched bool) {
+	switched = l.Stop()
 	<-l.sigInputLoopExited
 	s := l.first
 	for s != nil {
 		s.returnIfIdle()
 		s = s.next
 	}
+	return
 }
 
 // asyncInputLoop continuously fetch item from queue to input channel.

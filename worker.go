@@ -1,4 +1,4 @@
-package coral
+package line
 
 import (
 	"context"
@@ -14,12 +14,12 @@ type ExecContext struct {
 type worker struct {
 	execOption    execOption
 	uuid          string
-	input, output chan *M
+	input, output *chan *M
 	errCh         chan ErrorMsg
 	function      WorkFunc
 	close         chan struct{}
 	runningFlag   *sBool
-	execFlag      *sBool
+	execFlag      chan struct{}
 	mu            sync.Mutex
 }
 
@@ -27,7 +27,7 @@ type execOption struct {
 	timeout time.Duration
 }
 
-func newWorker(id string, input, output chan *M, errCh chan ErrorMsg,
+func newWorker(id string, input, output *chan *M, errCh chan ErrorMsg,
 	function WorkFunc, option execOption) *worker {
 	w := &worker{
 		uuid:        id,
@@ -37,10 +37,11 @@ func newWorker(id string, input, output chan *M, errCh chan ErrorMsg,
 		function:    function,
 		execOption:  option,
 		close:       make(chan struct{}),
+		execFlag:    make(chan struct{}),
 		runningFlag: newSBool(),
-		execFlag:    newSBool(),
 		mu:          sync.Mutex{},
 	}
+	close(w.execFlag)
 	return w
 }
 
@@ -51,20 +52,23 @@ func (w *worker) run() {
 			case <-w.close:
 				w.runningFlag.Set(false)
 				return
-			case t := <-w.input:
-				w.execFlag.Set(true)
+			case t := <-*w.input:
+				if t == nil {
+					return
+				}
+				w.execFlag = make(chan struct{})
 				next, err := w.execWithOptions(t)
 				if err != nil {
 					w.errCh <- ErrorMsg{"", w.uuid, time.Now(), t, err}
-					w.execFlag.Set(false)
+					close(w.execFlag)
 					continue
 				}
-				if next != nil && w.output != nil {
-					w.output <- next
+				if next != nil && *w.output != nil {
+					*w.output <- next
 				} else {
 					t.done()
 				}
-				w.execFlag.Set(false)
+				close(w.execFlag)
 			}
 		}
 	}
