@@ -1,13 +1,28 @@
 package line
 
 import (
+	"context"
 	"errors"
 	"sync/atomic"
+	"time"
 )
 
-type WorkFunc func(ctx ExecContext, input *M) (output *M, err error)
+type ExecContext struct {
+	context.Context
+	WorkerUUID string
+}
+
+type ErrorMsg struct {
+	StageName string
+	WorkerID  string
+	OccurAt   time.Time
+	M         *M
+	Err       error
+}
 
 type ErrHandler func(msg ErrorMsg)
+
+type WorkFunc func(ctx ExecContext, input *M) (output *M, err error)
 
 type sBool struct {
 	value int32

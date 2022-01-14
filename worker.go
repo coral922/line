@@ -6,17 +6,12 @@ import (
 	"time"
 )
 
-type ExecContext struct {
-	context.Context
-	WorkerUUID string
-}
-
 type worker struct {
 	execOption    execOption
 	uuid          string
 	input, output *chan *M
 	errCh         chan ErrorMsg
-	function      WorkFunc
+	function      *WorkFunc
 	close         chan struct{}
 	runningFlag   *sBool
 	execFlag      chan struct{}
@@ -28,7 +23,7 @@ type execOption struct {
 }
 
 func newWorker(id string, input, output *chan *M, errCh chan ErrorMsg,
-	function WorkFunc, option execOption) *worker {
+	function *WorkFunc, option execOption) *worker {
 	w := &worker{
 		uuid:        id,
 		input:       input,
@@ -95,7 +90,7 @@ func (w *worker) execWithOptions(m *M) (*M, error) {
 			recover()
 		}()
 		//WILL NOT exit function execution by force
-		m, err := w.function(ctx, m)
+		m, err := (*w.function)(ctx, m)
 		resCh <- struct {
 			m   *M
 			err error

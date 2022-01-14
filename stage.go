@@ -19,6 +19,51 @@ type Stage struct {
 	mu                sync.Mutex
 }
 
+type stageOption struct {
+	workerNum    int
+	errorHandler ErrHandler
+	execOption   execOption
+}
+
+type StageOption func(o *stageOption)
+
+func WithTimeout(timeout time.Duration) StageOption {
+	return func(o *stageOption) {
+		o.execOption.timeout = timeout
+	}
+}
+
+func WithWorkerNum(workerNum int) StageOption {
+	if workerNum <= 0 {
+		workerNum = 1
+	}
+	return func(o *stageOption) {
+		o.workerNum = workerNum
+	}
+}
+
+func WithErrHandler(handler ErrHandler) StageOption {
+	return func(o *stageOption) {
+		o.errorHandler = handler
+	}
+}
+
+func defaultExecOption() execOption {
+	return execOption{}
+}
+
+func defaultStageOption() *stageOption {
+	return &stageOption{
+		workerNum:    1,
+		errorHandler: defaultErrorHandler,
+		execOption:   defaultExecOption(),
+	}
+}
+
+func defaultErrorHandler(msg ErrorMsg) {
+	fmt.Printf("%s stage [worker_id : %s] error: %s \n", msg.StageName, msg.WorkerID, msg.Err)
+}
+
 func NewStage(name string, workFunc WorkFunc, option ...StageOption) *Stage {
 	s := &Stage{
 		name:     name,
@@ -46,7 +91,7 @@ func (s *Stage) newWorker(index int) *worker {
 	return newWorker(
 		s.name+"-"+fmt.Sprintf("%d", index),
 		&s.inputCh, &s.outputCh, s.errCh,
-		s.workFunc, s.option.execOption)
+		&s.workFunc, s.option.execOption)
 }
 
 func (s *Stage) isActive() bool {
@@ -72,13 +117,15 @@ func (s *Stage) getPre() *Stage {
 }
 
 func (s *Stage) setNext(next *Stage) {
-	if s.outputCh == nil {
-		s.outputCh = make(chan *M)
-	}
 	s.next = next
 	if next != nil {
+		if s.outputCh == nil {
+			s.outputCh = make(chan *M)
+		}
 		next.setInputCh(s.getOutputCh())
 		next.pre = s
+	} else {
+		s.outputCh = nil
 	}
 }
 
@@ -146,12 +193,4 @@ func (s *Stage) stop() {
 		s.close <- struct{}{}
 	}
 	s.active.Cas(true, false)
-}
-
-type ErrorMsg struct {
-	StageName string
-	WorkerID  string
-	OccurAt   time.Time
-	M         *M
-	Err       error
 }
