@@ -135,15 +135,43 @@ func TestDefaultQueue_Async(t *testing.T) {
 }
 
 func TestDefaultQueue_WithLimit(t *testing.T) {
-	o1, o2, o3, o4, o5 := o("1"), o("2"), o("3"), o("4"), o("5")
-	q := newDefaultQueue(1)
+	o1, o2, o3 := o("1"), o("2"), o("3")
+	q := newDefaultQueue(2)
 	q.Enqueue(o1, 1)
-	q.Enqueue(o2, 2)
-	q.Enqueue(o3, 2)
-	q.Enqueue(o4, 3)
-	q.Enqueue(o5, 4)
-	time.Sleep(10 * time.Millisecond)
-	if q.Len() != 0 {
+	q.Enqueue(o2, 1)
+	var o3done bool
+	go func() {
+		q.Enqueue(o3, 1)
+		o3done = true
+	}()
+	time.Sleep(500 * time.Millisecond)
+	if o3done {
+		t.FailNow()
+	}
+	q.Dequeue()
+	time.Sleep(500 * time.Millisecond)
+	if !o3done {
+		t.FailNow()
+	}
+}
+
+func TestPriorityQueue_WithLimit(t *testing.T) {
+	o1, o2, o3 := o("1"), o("2"), o("3")
+	q := newPriorityQueue(2)
+	q.Enqueue(o1, 1)
+	q.Enqueue(o2, 1)
+	var o3done bool
+	go func() {
+		q.Enqueue(o3, 1)
+		o3done = true
+	}()
+	time.Sleep(500 * time.Millisecond)
+	if o3done {
+		t.FailNow()
+	}
+	q.Dequeue()
+	time.Sleep(500 * time.Millisecond)
+	if !o3done {
 		t.FailNow()
 	}
 }

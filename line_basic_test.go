@@ -3,7 +3,6 @@ package line
 import (
 	"sort"
 	"testing"
-	"time"
 )
 
 func emptyStage(name string) *Stage {
@@ -134,6 +133,18 @@ func TestLine_RemoveStage_Inactive(t *testing.T) {
 	}
 }
 
+func TestLine_GetStage(t *testing.T) {
+	l := New()
+	s1, s2, s3 := emptyStage("s1"), emptyStage("s2"), emptyStage("s3")
+	l.SetStages([]*Stage{s1, s2, s3})
+	if l.GetStage("s1") != s1 ||
+		l.GetStage("s2") != s2 ||
+		l.GetStage("s3") != s3 ||
+		l.GetStage("not exist") != nil {
+		t.FailNow()
+	}
+}
+
 func TestLine_Run_NoInput(t *testing.T) {
 	l := New()
 	t.Run("empty stage", func(t *testing.T) {
@@ -172,9 +183,40 @@ func TestLine_StopAndWait_NoInput(t *testing.T) {
 	l := New()
 	s1, s2, s3 := emptyStage("s1"), emptyStage("s2"), emptyStage("s3")
 	l.SetStages([]*Stage{s1, s2, s3}).Run()
-	time.Sleep(time.Second)
 	s := l.StopAndWait()
 	if !s {
 		t.FailNow()
 	}
+}
+
+func TestLine_Input(t *testing.T) {
+	type obj struct {
+		id string
+	}
+	l := New()
+	s1, s2, s3 := emptyStage("s1"), emptyStage("s2"), emptyStage("s3")
+	l.SetStages([]*Stage{s1, s2, s3})
+	t.Run("general input", func(t *testing.T) {
+		l.Input(obj{"1"})
+		l.Input(obj{"2"})
+		l.Input(obj{"3"})
+		if l.q.Len() != 3 {
+			t.FailNow()
+		}
+	})
+	t.Run("batch input", func(t *testing.T) {
+		l.Input([]obj{{"1"}, {"2"}, {"3"}}, WithBatch())
+		if l.q.Len() != 6 {
+			t.FailNow()
+		}
+	})
+	t.Run("input with highest prior", func(t *testing.T) {
+		l.Input([]obj{{"1"}, {"2"}, {"3"}}, WithBatch(), WithHighestPriority())
+		if l.q.Len() != 9 {
+			t.FailNow()
+		}
+		if *l.highestPriority != 1 {
+			t.FailNow()
+		}
+	})
 }

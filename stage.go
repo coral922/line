@@ -81,17 +81,27 @@ func NewStage(name string, workFunc WorkFunc, option ...StageOption) *Stage {
 }
 
 func (s *Stage) initWorkers() *Stage {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	workers := make([]*worker, 0)
 	for i := 0; i < s.option.workerNum; i++ {
-		s.workers = append(s.workers, s.newWorker(i))
+		workers = append(workers, s.newWorker(i))
 	}
+	s.workers = workers
 	return s
+}
+
+func (s *Stage) refreshWorkers() {
+	for _, w := range s.workers {
+		w.refresh()
+	}
 }
 
 func (s *Stage) newWorker(index int) *worker {
 	return newWorker(
 		s.name+"-"+fmt.Sprintf("%d", index),
 		&s.inputCh, &s.outputCh, s.errCh,
-		&s.workFunc, s.option.execOption)
+		&s.workFunc, &s.option.execOption)
 }
 
 func (s *Stage) isActive() bool {
@@ -102,6 +112,9 @@ func (s *Stage) setInputCh(ch chan *M) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.inputCh = ch
+	if s.isActive() {
+		s.refreshWorkers()
+	}
 }
 
 func (s *Stage) getOutputCh() chan *M {
@@ -144,7 +157,7 @@ func (s *Stage) ResizeWorkerNum(to int) {
 			w := s.newWorker(i)
 			s.workers = append(s.workers, w)
 			if s.isActive() {
-				go w.run()
+				w.run()
 			}
 		}
 	} else {
@@ -157,17 +170,43 @@ func (s *Stage) ResizeWorkerNum(to int) {
 	}
 }
 
+func (s *Stage) SetTimeout(to time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.option.execOption.timeout = to
+}
+
+func (s *Stage) SetErrHandler(to ErrHandler) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.option.errorHandler = to
+}
+
+func (s *Stage) SetFunc(to WorkFunc) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.workFunc = to
+}
+
+func (s *Stage) GetWorkerNum() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.workers)
+}
+
 func (s *Stage) listen() {
 	if s.active.Cas(false, true) {
 		go func() {
 			for _, w := range s.workers {
-				go w.run()
+				w.run()
 			}
 			for {
 				select {
 				case err := <-s.errCh:
 					err.StageName = s.name
-					s.option.errorHandler(err)
+					if s.option.errorHandler != nil {
+						s.option.errorHandler(err)
+					}
 					err.M.done()
 				case <-s.close:
 					return

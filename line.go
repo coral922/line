@@ -74,7 +74,7 @@ func New(option ...LineOption) *Line {
 	if l.customQueue != nil {
 		l.q = l.customQueue
 	} else {
-		l.q = newQueue(l.pqSupported)
+		l.q = newQueue(l.pqSupported, l.maxQueueLen)
 	}
 	return l
 }

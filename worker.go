@@ -2,16 +2,18 @@ package line
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 )
 
 type worker struct {
-	execOption    execOption
+	execOption    *execOption
 	uuid          string
 	input, output *chan *M
 	errCh         chan ErrorMsg
 	function      *WorkFunc
+	refreshCh     chan struct{}
 	close         chan struct{}
 	runningFlag   *sBool
 	execFlag      chan struct{}
@@ -23,7 +25,7 @@ type execOption struct {
 }
 
 func newWorker(id string, input, output *chan *M, errCh chan ErrorMsg,
-	function *WorkFunc, option execOption) *worker {
+	function *WorkFunc, option *execOption) *worker {
 	w := &worker{
 		uuid:        id,
 		input:       input,
@@ -31,6 +33,7 @@ func newWorker(id string, input, output *chan *M, errCh chan ErrorMsg,
 		errCh:       errCh,
 		function:    function,
 		execOption:  option,
+		refreshCh:   make(chan struct{}),
 		close:       make(chan struct{}),
 		execFlag:    make(chan struct{}),
 		runningFlag: newSBool(),
@@ -40,45 +43,54 @@ func newWorker(id string, input, output *chan *M, errCh chan ErrorMsg,
 	return w
 }
 
+func (w *worker) refresh() {
+	w.refreshCh <- struct{}{}
+}
+
 func (w *worker) run() {
 	if w.runningFlag.Cas(false, true) {
-		for {
-			select {
-			case <-w.close:
-				w.runningFlag.Set(false)
-				return
-			case t := <-*w.input:
-				if t == nil {
+		go func() {
+			for {
+				select {
+				case <-w.refreshCh:
+				case <-w.close:
 					return
-				}
-				w.execFlag = make(chan struct{})
-				next, err := w.execWithOptions(t)
-				if err != nil {
-					w.errCh <- ErrorMsg{"", w.uuid, time.Now(), t, err}
+				case t := <-*w.input:
+					if t == nil {
+						return
+					}
+					w.execFlag = make(chan struct{})
+					next, err := w.execWithOptions(t)
+					if err != nil {
+						w.errCh <- ErrorMsg{"", w.uuid, time.Now(), t, err}
+						close(w.execFlag)
+						continue
+					}
+					if next != nil && *w.output != nil {
+						*w.output <- next
+					} else {
+						t.done()
+					}
 					close(w.execFlag)
-					continue
 				}
-				if next != nil && *w.output != nil {
-					*w.output <- next
-				} else {
-					t.done()
-				}
-				close(w.execFlag)
 			}
-		}
+		}()
 	}
 }
 
 func (w *worker) gracefullyStop() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-
 	if w.runningFlag.Val() {
 		w.close <- struct{}{}
+		w.runningFlag.Set(false)
 	}
 }
 
 func (w *worker) execWithOptions(m *M) (*M, error) {
+	if *w.function == nil {
+		return m, nil
+	}
 	ctx := w.timeoutCtx()
 	resCh := make(chan struct {
 		m   *M
@@ -90,7 +102,14 @@ func (w *worker) execWithOptions(m *M) (*M, error) {
 			recover()
 		}()
 		//WILL NOT exit function execution by force
-		m, err := (*w.function)(ctx, m)
+		m, err := func() (o *M, err error) {
+			defer func() {
+				if e := recover(); e != nil {
+					err = fmt.Errorf("%v", e)
+				}
+			}()
+			return (*w.function)(ctx, m)
+		}()
 		resCh <- struct {
 			m   *M
 			err error
