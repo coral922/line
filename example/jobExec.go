@@ -4,7 +4,7 @@ package main
 
 import (
 	"fmt"
-	"line"
+	"github.com/coral922/line"
 	"math/rand"
 	"strconv"
 	"time"
