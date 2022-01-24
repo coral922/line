@@ -12,6 +12,7 @@ If your program has processes similar to below codes.
  ```
 //fetching items
 items := fetchItems()
+
 //handle each item
 for _, item := range items {
     err := doSomethingA(item)
@@ -43,8 +44,10 @@ type (fl FuncList) Handle(items []Item) {
 
 //define stages
 var stages FuncList = []Func{doSomethingA, doSomethingB, doSomethingC, ...}
+
 //fetching items
 items := fetchItems()
+
 //handle them
 stages.Handle(items)
 ```
@@ -66,30 +69,34 @@ type MyItem struct {
 // your stage function
 func YourStage1Func(ctx line.ExecContext, input *line.M) (output *line.M, err error) {
     //you need to assert item's type.
-	item := input.Item().(*MyItem)
+    item := input.Item().(*MyItem)
+
     if err = doSomethingWithItem(item); err != nil {
         // if you return an error, the process will be interrupted and an ErrHandler will handle this error.
         return nil, err
     }
+
     // send to next stage, if there is no next stage, the process is done.
-	return input, nil
+    return input, nil
 }
 
 func YourStage2Func(ctx line.ExecContext, input *line.M) (output *line.M, err error) {
-	item := input.Item().(*MyItem)
+    item := input.Item().(*MyItem)
     doSomethingElseWithItem(item)
-	return input, nil
+    return input, nil
 }
 ``` 
 Create Line And Set Stages with your options, then run it.
 ```
 l := line.New(line.WithMaxQueueLen(10), line.WithPQSupported())
+
 //create your stages with your function and options.
 stages := []*line.Stage{
         //WithWorkerNum represents how many goroutines are created to exec your stage function.
-		line.NewStage("stage1Name", YourStage1Func, line.WithWorkerNum(10)),
-		line.NewStage("stage2Name", YourStage2Func, line.WithWorkerNum(10)),
-	}
+        line.NewStage("stage1Name", YourStage1Func, line.WithWorkerNum(10)),
+        line.NewStage("stage2Name", YourStage2Func, line.WithWorkerNum(10)),
+    }
+
 //Set and run.
 l.SetStages(stages).Run()
 ```
