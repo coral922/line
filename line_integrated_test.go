@@ -54,7 +54,7 @@ var b64F = func(ctx ExecContext, input *M) (output *M, err error) {
 var resBucket = make([]*C, 0)
 
 var final = func(ctx ExecContext, input *M) (output *M, err error) {
-	time.Sleep(time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 	cc := input.Item().(*C)
 	if strings.Contains(cc.Str, "err") {
 		return input, errors.New(cc.Str)
@@ -70,46 +70,53 @@ func clean() {
 
 func TestLine_Integrated_General(t *testing.T) {
 	clean()
-	l := New(WithMaxQueueLen(10000))
+	l := New(WithMaxQueueLen(10000), WithPQSupported())
 	stages := []*Stage{
 		NewStage("md5", md5F, WithWorkerNum(10)),
 		NewStage("sha1", sha1F, WithWorkerNum(10)),
 		NewStage("b64", b64F, WithWorkerNum(10)),
-		NewStage("final", final, WithWorkerNum(1)),
+		NewStage("final", final, WithWorkerNum(10)),
 	}
 	l.SetStages(stages).Run()
 
 	//always has input
 	go func() {
 		for {
-			time.Sleep(time.Microsecond)
+			time.Sleep(time.Millisecond)
 			l.Input(newC(time.Now().String()))
 		}
 	}()
 
 	a1 := newC("a1")
-	l.InputAndWait(a1)
+	l.InputAndWait(a1, WithPriority(1))
+	fmt.Println("a1 done")
 	if a1.StrBase64 == "" || len(a1.StrSha1) == 0 || len(a1.StrMd5) == 0 {
+		fmt.Println(*a1)
 		t.FailNow()
 	}
 
 	l.RemoveStage("b64")
 	a2 := newC("a2")
-	l.InputAndWait(a2)
+	l.InputAndWait(a2, WithPriority(1))
+	fmt.Println("a2 done")
 	if a2.StrBase64 != "" || len(a2.StrSha1) == 0 || len(a2.StrMd5) == 0 {
+		fmt.Println(*a2)
 		t.FailNow()
 	}
 
 	l.RemoveStage("md5")
 	a3 := newC("a3")
-	l.InputAndWait(a3)
+	l.InputAndWait(a3, WithPriority(1))
+	fmt.Println("a3 done")
 	if a3.StrBase64 != "" || len(a3.StrSha1) == 0 || len(a3.StrMd5) != 0 {
+		fmt.Println(*a3)
 		t.FailNow()
 	}
 
 	l.AppendStages([]*Stage{NewStage("md5", md5F, WithWorkerNum(10))})
 	a4 := newC("a4")
-	l.InputAndWait(a4)
+	l.InputAndWait(a4, WithPriority(1))
+	fmt.Println("a4 done")
 	if a4.StrBase64 != "" || len(a4.StrSha1) == 0 || len(a4.StrMd5) == 0 {
 		fmt.Println(*a4)
 		t.FailNow()
@@ -117,8 +124,10 @@ func TestLine_Integrated_General(t *testing.T) {
 
 	l.AppendStages([]*Stage{NewStage("b64", b64F, WithWorkerNum(10))}, "sha1")
 	a5 := newC("a5")
-	l.InputAndWait(a5)
+	l.InputAndWait(a5, WithPriority(1))
+	fmt.Println("a5 done")
 	if a5.StrBase64 == "" || len(a5.StrSha1) == 0 || len(a5.StrMd5) == 0 {
+		fmt.Println(*a5)
 		t.FailNow()
 	}
 
@@ -128,8 +137,10 @@ func TestLine_Integrated_General(t *testing.T) {
 		NewStage("final", final, WithWorkerNum(1)),
 	})
 	a6 := newC("a6")
-	l.InputAndWait(a6)
+	l.InputAndWait(a6, WithPriority(1))
+	fmt.Println("a6 done")
 	if a6.StrBase64 == "" || len(a6.StrSha1) != 0 || len(a6.StrMd5) == 0 {
+		fmt.Println(*a6)
 		t.FailNow()
 	}
 	l.AppendStages([]*Stage{NewStage("sha1", sha1F, WithWorkerNum(10))}, "b64")
@@ -143,15 +154,18 @@ func TestLine_Integrated_General(t *testing.T) {
 			cc.Str += "_timeout"
 		}
 	})
-	l.InputAndWait(a7)
+	l.InputAndWait(a7, WithPriority(1))
+	fmt.Println("a7 done")
 	if a7.Str != "err_a7_handled" {
+		fmt.Println(*a7)
 		t.FailNow()
 	}
 	l.GetStage("final").SetTimeout(time.Microsecond)
 	a8 := newC("err_a8")
-	l.InputAndWait(a8)
+	l.InputAndWait(a8, WithPriority(1))
+	fmt.Println("a8 done")
 	if a8.Str != "err_a8_timeout" {
+		fmt.Println(*a8)
 		t.FailNow()
 	}
-	l.GetStage("final").SetTimeout(0)
 }

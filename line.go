@@ -234,7 +234,9 @@ func (l *Line) Run() {
 // Stop stops fetching item from queue.
 func (l *Line) Stop() (switched bool) {
 	if l.opened.Cas(true, false) {
-		l.q.Enqueue(nil)
+		if l.q.Len() == 0 {
+			l.q.Enqueue(nil)
+		}
 		return true
 	}
 	return false
